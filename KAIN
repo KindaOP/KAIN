@@ -1,0 +1,11 @@
+#!./venv/bin/python3
+from gui.main import MainApp
+
+
+def main():
+    app = MainApp()
+    app.MainLoop()
+
+
+if __name__=='__main__':
+    main()

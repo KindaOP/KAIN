@@ -28,5 +28,4 @@ fi
 pip install -U wxPython
 
 pip install opencv-python opencv-contrib-python
-
-
+pip install transformers
