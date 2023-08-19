@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Union
+from typing import Union, Tuple
 
 
 class ContextVector:
@@ -41,13 +41,13 @@ class ContextVector:
     
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, seq_length:int, num_latent_dim:int, n:int=10000):
-        assert num_latent_dim%2==0
+    def __init__(self, num_vectors:int, num_features:int, n:int=10000):
+        assert num_features%2==0
         super().__init__()
-        p_ids = torch.arange(0, seq_length, dtype=torch.float32)
-        l_ids = torch.arange(0, num_latent_dim//2, dtype=torch.float32)
-        pp, ll = torch.meshgrid(p_ids, l_ids, indexing='ij')
-        phases = pp / n**(2*ll/num_latent_dim)
+        v_ids = torch.arange(0, num_vectors, dtype=torch.float32)
+        f_ids = torch.arange(0, num_features//2, dtype=torch.float32)
+        v, f = torch.meshgrid(v_ids, f_ids, indexing='ij')
+        phases = v / n**(2*f/num_features)
         p_sin = torch.sin(phases)
         p_cos = torch.cos(phases)
         pos = torch.stack([p_sin, p_cos], dim=-1)
@@ -55,33 +55,45 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pos', pos.unsqueeze(dim=0))
 
     def forward(self, x:torch.Tensor) -> torch.Tensor:
-        x = x + self.pos[:, :x.shape[1], :]
+        x = x + self.pos
         return x
     
 
-class MultiheadAttentionLayer(nn.Module):
-    def __init__(self, num_latent_dim:int, num_heads:int):
-        assert num_latent_dim%num_heads==0
+class PositionalEmbedding(nn.Module):
+    def __init__(self, num_positions:int, num_features:int):
         super().__init__()
-        self.num_latent_dim = num_latent_dim
-        self.num_heads = num_heads
-        self.head_size = num_latent_dim // num_heads
+        pos = torch.arange(num_positions)
+        self.register_buffer("pos", pos.unsqueeze(dim=0))
+        self.pos_emb = nn.Embedding(num_positions, num_features, max_norm=1)
 
-        self.fc_Q = nn.Linear(num_latent_dim, num_latent_dim)
-        self.fc_K = nn.Linear(num_latent_dim, num_latent_dim)
-        self.fc_V = nn.Linear(num_latent_dim, num_latent_dim)
-        self.fc_out = nn.Linear(num_latent_dim, num_latent_dim)
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        x = x + self.pos_emb(self.pos)
+        return x
+
+
+class MultiheadAttentionLayer(nn.Module):
+    def __init__(self, num_features:int, num_heads:int):
+        assert num_features%num_heads==0
+        super().__init__()
+        self.num_features = num_features
+        self.num_heads = num_heads
+        self.head_size = num_features // num_heads
+
+        self.fc_Q = nn.Linear(num_features, num_features)
+        self.fc_K = nn.Linear(num_features, num_features)
+        self.fc_V = nn.Linear(num_features, num_features)
+        self.fc_out = nn.Linear(num_features, num_features)
 
     def split_into_heads(self, x:torch.Tensor) -> torch.Tensor:
-        batch_size, seq_length = x.shape[:2]
-        x = x.reshape(batch_size, seq_length, self.num_heads, self.head_size)
+        batch_size, num_vectors = x.shape[:2]
+        x = x.reshape(batch_size, num_vectors, self.num_heads, self.head_size)
         x = x.transpose(1, 2)
         return x
     
     def combine_heads(self, x:torch.Tensor) -> torch.Tensor:
         x = x.transpose(1, 2)
-        batch_size, seq_length = x.shape[:2]
-        x = x.reshape(batch_size, seq_length, self.num_latent_dim)
+        batch_size, num_vectors = x.shape[:2]
+        x = x.reshape(batch_size, num_vectors, self.num_features)
         return x
 
     def forward(
@@ -107,11 +119,11 @@ class MultiheadAttentionLayer(nn.Module):
     
 
 class FeedForwardLayer(nn.Module):
-    def __init__(self, num_inout_dim:int, num_hidden_dim:int):
+    def __init__(self, num_features:int, num_hidden_features:int):
         super().__init__()
-        self.fc_in = nn.Linear(num_inout_dim, num_hidden_dim)
+        self.fc_in = nn.Linear(num_features, num_hidden_features)
         self.relu = nn.ReLU()
-        self.fc_out = nn.Linear(num_hidden_dim, num_inout_dim)
+        self.fc_out = nn.Linear(num_hidden_features, num_features)
 
     def forward(self, x:torch.Tensor) -> torch.Tensor:
         x = self.fc_in(x)
@@ -121,11 +133,11 @@ class FeedForwardLayer(nn.Module):
     
 
 class AddNormLayer(nn.Module):
-    def __init__(self, num_latent_dim:int, dropout_rate:float):
+    def __init__(self, num_features:int, dropout_rate:float):
         assert 0<=dropout_rate<=1
         super().__init__()
         self.dropout = nn.Dropout(dropout_rate)
-        self.layer_norm = nn.LayerNorm(num_latent_dim)
+        self.layer_norm = nn.LayerNorm(num_features)
 
     def forward(self, x:torch.Tensor, y:torch.Tensor) -> torch.Tensor:
         x = x + self.dropout(y)
@@ -136,17 +148,16 @@ class AddNormLayer(nn.Module):
 class EncoderBlock(nn.Module):
     def __init__(
         self, 
-        num_latent_dim:int, 
+        num_features:int, 
         num_heads:int, 
         num_ff_dim:int,
         dropout_rate:float
         ):
-        assert 0<=dropout_rate<=1
         super().__init__()
-        self.self_attention = MultiheadAttentionLayer(num_latent_dim, num_heads)
-        self.feed_forward = FeedForwardLayer(num_latent_dim, num_ff_dim)
-        self.addnorm_sa = AddNormLayer(num_latent_dim, dropout_rate)
-        self.addnorm_ff = AddNormLayer(num_latent_dim, dropout_rate)
+        self.self_attention = MultiheadAttentionLayer(num_features, num_heads)
+        self.feed_forward = FeedForwardLayer(num_features, num_ff_dim)
+        self.addnorm_sa = AddNormLayer(num_features, dropout_rate)
+        self.addnorm_ff = AddNormLayer(num_features, dropout_rate)
 
     def forward(
         self, x:torch.Tensor, mask:Union[torch.Tensor, None]
@@ -161,19 +172,18 @@ class EncoderBlock(nn.Module):
 class DecoderBlock(nn.Module):
     def __init__(
         self, 
-        num_latent_dim:int, 
+        num_features:int,
         num_heads:int, 
         num_ff_dim:int,
         dropout_rate:float
         ):
-        assert 0<=dropout_rate<=1
         super().__init__()
-        self.self_attention = MultiheadAttentionLayer(num_latent_dim, num_heads)
-        self.cross_attention = MultiheadAttentionLayer(num_latent_dim, num_heads)
-        self.feed_forward = FeedForwardLayer(num_latent_dim, num_ff_dim)
-        self.addnorm_sa = AddNormLayer(num_latent_dim, dropout_rate)
-        self.addnorm_ca = AddNormLayer(num_latent_dim, dropout_rate)
-        self.addnorm_ff = AddNormLayer(num_latent_dim, dropout_rate)
+        self.self_attention = MultiheadAttentionLayer(num_features, num_heads)
+        self.cross_attention = MultiheadAttentionLayer(num_features, num_heads)
+        self.feed_forward = FeedForwardLayer(num_features, num_ff_dim)
+        self.addnorm_sa = AddNormLayer(num_features, dropout_rate)
+        self.addnorm_ca = AddNormLayer(num_features, dropout_rate)
+        self.addnorm_ff = AddNormLayer(num_features, dropout_rate)
 
     def forward(
         self, 
@@ -195,7 +205,7 @@ class TransformerEncoder(nn.Module):
     def __init__(
         self, 
         num_blocks:int,
-        num_latent_dim:int, 
+        num_features:int, 
         num_heads:int, 
         num_ff_dim:int,
         dropout_rate:float
@@ -207,10 +217,7 @@ class TransformerEncoder(nn.Module):
                 self,
                 f'enc_{i}', 
                 EncoderBlock(
-                    num_latent_dim,
-                    num_heads,
-                    num_ff_dim,
-                    dropout_rate
+                    num_features, num_heads, num_ff_dim, dropout_rate
                 )
             )
 
@@ -229,7 +236,7 @@ class TransformerDecoder(nn.Module):
     def __init__(
         self, 
         num_blocks:int,
-        num_latent_dim:int, 
+        num_features:int, 
         num_heads:int, 
         num_ff_dim:int,
         dropout_rate:float
@@ -241,10 +248,7 @@ class TransformerDecoder(nn.Module):
                 self,
                 f'dec_{i}', 
                 DecoderBlock(
-                    num_latent_dim,
-                    num_heads,
-                    num_ff_dim,
-                    dropout_rate
+                    num_features, num_heads, num_ff_dim, dropout_rate
                 )
             )
 
