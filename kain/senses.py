@@ -224,7 +224,7 @@ class VoiceEncoder(SenseNetwork):
         x = torch.from_numpy(x).type(torch.float32)
         x = x - x.mean(dim=-1, keepdims=True)
         x = self.spec(x)
-        x = x.abs().transpose(-2, -1)
+        x = x.transpose(-2, -1)
         x = self(x)
         return x
     
