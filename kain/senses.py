@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from torchaudio.transforms import Spectrogram, InverseSpectrogram
 from typing import Sequence, Any, Tuple, Union
 
 from .core import *
@@ -190,9 +191,83 @@ class ImageDecoder(nn.Module):
         return x
 
 
-class VoiceEncoder(nn.Module):
-    pass
+class VoiceEncoder(SenseNetwork):
+    def __init__(
+        self, 
+        num_blocks:int,
+        num_features:int, 
+        num_heads:int, 
+        num_ff_dim:int,
+        dropout_rate:float
+        ):
+        super().__init__()
+        self.spec = Spectrogram(
+            n_fft=2*(num_features-1),
+            win_length=None,
+            hop_length=None,
+            window_fn=torch.hann_window,
+            normalized=True,
+            center=True,
+            pad_mode='reflect',
+            onesided=True
+        )
+        self.encoder = TransformerEncoder(
+            num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
+        )
 
+    def forward(self, x:torch.Tensor) -> ContextVector:
+        x = self.encoder(x, None)
+        return ContextVector(x)
+    
+    @torch.no_grad()
+    def predict(self, x:np.ndarray) -> ContextVector:
+        x = torch.from_numpy(x).type(torch.float32)
+        x = x - x.mean(dim=-1, keepdims=True)
+        x = self.spec(x)
+        x = x.abs().transpose(-2, -1)
+        x = self(x)
+        return x
+    
 
-class VoiceDecoder(nn.Module):
-    pass
+class VoiceDecoder(SenseNetwork):
+    def __init__(
+        self, 
+        num_blocks:int,
+        num_features:int, 
+        num_heads:int, 
+        num_ff_dim:int,
+        dropout_rate:float
+        ):
+        super().__init__()
+        self.inv_spec = InverseSpectrogram(
+            n_fft=2*(num_features-1),
+            win_length=None,
+            hop_length=None,
+            window_fn=torch.hann_window,
+            normalized=True,
+            center=True,
+            pad_mode='reflect',
+            onesided=True
+        )
+        self.real_decoder = TransformerDecoder(
+            num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
+        )
+        self.imag_decoder = TransformerDecoder(
+            num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
+        )
+
+    def forward(self, x_src:ContextVector, x_tgt:ContextVector) -> torch.Tensor:
+        x_real = self.real_decoder(x_src.tensor, x_tgt.tensor, None, None)
+        x_imag = self.imag_decoder(x_src.tensor, x_tgt.tensor, None, None)
+        x = torch.stack([x_real, x_imag], dim=-1)
+        return x
+    
+    @torch.no_grad()
+    def predict(self, x_src:ContextVector, x_tgt:ContextVector) -> np.ndarray:
+        x = self(x_src, x_tgt)
+        x = torch.view_as_complex(x)
+        x = x.transpose(-2, -1)
+        x = self.inv_spec(x)
+        x = x.numpy()
+        return x
+    
