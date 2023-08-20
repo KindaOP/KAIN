@@ -268,6 +268,7 @@ class VoiceDecoder(SenseNetwork):
         x = torch.view_as_complex(x)
         x = x.transpose(-2, -1)
         x = self.inv_spec(x)
+        x = x - x.mean(dim=-1, keepdims=True)
         x = x.numpy()
         return x
     
