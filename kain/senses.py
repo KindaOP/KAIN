@@ -26,7 +26,7 @@ class SenseNetwork(nn.Module):
 class TextEncoder(SenseNetwork):
     def __init__(
         self, 
-        langs:Sequence[str],
+        lang_tensor:torch.Tensor,
         num_vectors:int,
         num_blocks:int,
         num_features:int, 
@@ -35,8 +35,7 @@ class TextEncoder(SenseNetwork):
         dropout_rate:float
         ):
         super().__init__()
-        self.num_vectors = num_vectors
-        self.enc_dict, _ = Text.get_character_dicts(langs)
+        self.enc_dict, _ = Text.get_character_dicts(lang_tensor)
         self.pos_enc = PositionalEncoding(num_vectors, num_features)
         self.encoder = TransformerEncoder(
             num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
@@ -45,10 +44,11 @@ class TextEncoder(SenseNetwork):
     @torch.no_grad()
     def encode(self, sentences:Sequence[str]) -> torch.Tensor:
         dict_length = len(self.enc_dict)
+        num_vectors = self.pos_enc.pos.shape[-2]
         result_list = []
         for sent in sentences:
             vecs = [[self.enc_dict[c]/dict_length] for c in sent]
-            pad_length = self.num_vectors - len(vecs)
+            pad_length = num_vectors - len(vecs)
             vecs += pad_length * [[self.enc_dict[Text.PAD_TOKEN]]]
             result_list.append(vecs)
         result = torch.tensor(result_list, dtype=torch.float32)
@@ -69,7 +69,7 @@ class TextEncoder(SenseNetwork):
 class TextDecoder(SenseNetwork):
     def __init__(
         self, 
-        langs:Sequence[str],
+        lang_tensor:torch.Tensor,
         num_vectors:int,
         num_blocks:int,
         num_features:int, 
@@ -78,7 +78,7 @@ class TextDecoder(SenseNetwork):
         dropout_rate:float
         ):
         super().__init__()
-        _, self.dec_dict = Text.get_character_dicts(langs)
+        _, self.dec_dict = Text.get_character_dicts(lang_tensor)
         self.pos_enc = PositionalEncoding(num_vectors, num_features)
         self.encoder = TransformerDecoder(
             num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
