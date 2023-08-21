@@ -57,7 +57,7 @@ class TextEncoder(SenseNetwork):
     def forward(self, x:torch.Tensor) -> ContextVector:
         x = self.pos_enc(x)
         x = self.encoder(x, None)
-        return ContextVector(x)
+        return ContextVector(x).sum(dim=-2)
     
     @torch.no_grad()
     def predict(self, x:Sequence[str]) -> ContextVector:
@@ -141,7 +141,7 @@ class ImageEncoder(nn.Module):
         x = x.transpose(-2, -1)
         x = self.pos_emb(x)
         x = self.encoder(x, None)
-        return ContextVector(x)
+        return ContextVector(x).sum(dim=-2)
     
     @torch.no_grad()
     def predict(self, x:np.ndarray) -> ContextVector:
@@ -194,6 +194,7 @@ class ImageDecoder(nn.Module):
 class VoiceEncoder(SenseNetwork):
     def __init__(
         self, 
+        max_length:int,
         num_blocks:int,
         num_features:int, 
         num_heads:int, 
@@ -201,23 +202,29 @@ class VoiceEncoder(SenseNetwork):
         dropout_rate:float
         ):
         super().__init__()
+        n_fft = 2*(num_features-1)
+        win_length = n_fft
+        hop_length = n_fft // 2
+        num_vectors = max_length / hop_length
         self.spec = Spectrogram(
             n_fft=2*(num_features-1),
-            win_length=None,
-            hop_length=None,
+            win_length=win_length,
+            hop_length=hop_length,
             window_fn=torch.hann_window,
             normalized=True,
             center=True,
             pad_mode='reflect',
             onesided=True
         )
+        self.pos_enc = PositionalEncoding(num_vectors, num_features)
         self.encoder = TransformerEncoder(
             num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
         )
 
     def forward(self, x:torch.Tensor) -> ContextVector:
+        x = self.pos_enc(x)
         x = self.encoder(x, None)
-        return ContextVector(x)
+        return ContextVector(x).sum(dim=-2)
     
     @torch.no_grad()
     def predict(self, x:np.ndarray) -> ContextVector:
@@ -232,6 +239,7 @@ class VoiceEncoder(SenseNetwork):
 class VoiceDecoder(SenseNetwork):
     def __init__(
         self, 
+        max_length:int,
         num_blocks:int,
         num_features:int, 
         num_heads:int, 
@@ -239,26 +247,32 @@ class VoiceDecoder(SenseNetwork):
         dropout_rate:float
         ):
         super().__init__()
-        self.inv_spec = InverseSpectrogram(
-            n_fft=2*(num_features-1),
-            win_length=None,
-            hop_length=None,
-            window_fn=torch.hann_window,
-            normalized=True,
-            center=True,
-            pad_mode='reflect',
-            onesided=True
-        )
+        n_fft = 2*(num_features-1)
+        win_length = n_fft
+        hop_length = n_fft // 2
+        num_vectors = max_length / hop_length
+        self.pos_enc = PositionalEncoding(num_vectors, num_features)
         self.real_decoder = TransformerDecoder(
             num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
         )
         self.imag_decoder = TransformerDecoder(
             num_blocks, num_features, num_heads, num_ff_dim, dropout_rate    
         )
-
+        self.inv_spec = InverseSpectrogram(
+            n_fft=2*(num_features-1),
+            win_length=win_length,
+            hop_length=hop_length,
+            window_fn=torch.hann_window,
+            normalized=True,
+            center=True,
+            pad_mode='reflect',
+            onesided=True
+        )
+        
     def forward(self, x_src:ContextVector, x_tgt:ContextVector) -> torch.Tensor:
-        x_real = self.real_decoder(x_src.tensor, x_tgt.tensor, None, None)
-        x_imag = self.imag_decoder(x_src.tensor, x_tgt.tensor, None, None)
+        x_tgt = self.pos_enc(x_tgt.tensor)
+        x_real = self.real_decoder(x_src.tensor, x_tgt, None, None)
+        x_imag = self.imag_decoder(x_src.tensor, x_tgt, None, None)
         x = torch.stack([x_real, x_imag], dim=-1)
         return x
     

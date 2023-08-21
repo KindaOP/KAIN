@@ -7,7 +7,7 @@ from typing import Union, Tuple
 class ContextVector:
     def __normalize(self):
         n = torch.sqrt(torch.sum(self.tensor**2, dim=-1, keepdim=True))
-        self.tensor = torch.where(n!=0, self.tensor/n, self.tensor)
+        self.tensor = torch.where(n!=0, self.tensor/n, 0)
     
     @classmethod
     def create(cls, *args, **kwargs):
@@ -38,6 +38,11 @@ class ContextVector:
     
     def __getitem__(self, x):
         return self.tensor[x]
+    
+    def sum(self, dim:int=-2) -> torch.Tensor:
+        self.tensor = self.tensor.sum(dim=dim, keepdim=True)
+        self.__normalize()
+        return self
     
 
 class PositionalEncoding(nn.Module):
