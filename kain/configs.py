@@ -3,11 +3,21 @@ from typing import Sequence, Tuple, Dict
 
 
 class General:
-    pass
+	#################### CUSTOMISABLE ####################
+	NUM_BLOCKS_PER_ENC = 3
+	NUM_HEADS_PER_BLOCK = 2
+	NUM_FEEDFORWARD_DIM = 256
+	ADDNORM_DROPOUT_RATE = 0.1
+	######################################################
+
+	NUM_FEATURES = None
 
 
 class Text:
-	MAX_NUM_CHARACTERS = 128
+	#################### CUSTOMISABLE ####################
+	MAX_CHARS_PER_SENT = 196
+	######################################################
+	
 	PAD_TOKEN = "<PAD>"
 	UNICODES = OrderedDict({
 		'Basic Latin': (0, 127),
@@ -193,9 +203,24 @@ class Text:
 
 
 class Image:
-    pass
+	#################### CUSTOMISABLE ####################
+	IMAGE_SHAPE = (224, 224)
+	NUM_PATCHES = (28, 28)
+	NUM_CHANNELS = 3
+	######################################################
+	
+	General.NUM_FEATURES = (
+		IMAGE_SHAPE[0]//NUM_PATCHES[0] * \
+		IMAGE_SHAPE[1]//NUM_PATCHES[1] * \
+		NUM_CHANNELS
+	)
 
 
 class Voice:
-    pass
+    #################### CUSTOMISABLE ####################
+	SAMPLING_RATE = 12000
+	MAX_SECONDS = 5
+	######################################################
+	
+	MAX_SIGNAL_LENGTH = SAMPLING_RATE * MAX_SECONDS
 
