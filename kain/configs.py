@@ -21,6 +21,7 @@ class Text:
 	######################################################
 	
 	PAD_TOKEN = "<PAD>"
+	UNKNOWN_TOKEN = "<UNK>"
 	UNICODES = (
 		('Basic Latin', 0, 127),
 		('Latin Extended-A', 256, 383),
@@ -194,7 +195,7 @@ class Text:
         ) -> Tuple[Dict[str, int], Dict[int, str]]:
 		assert len(lang_tensor)==len(Text.UNICODES)
 		assert torch.any(lang_tensor==True)
-		char_list = [Text.PAD_TOKEN]
+		char_list = [Text.PAD_TOKEN, Text.UNKNOWN_TOKEN]
 		for idx, is_selected in enumerate(lang_tensor):
 			if is_selected:
 				_, ci, cf = Text.UNICODES[idx]
@@ -215,7 +216,13 @@ class Text:
 		dict_length = len(encoding_dict)
 		result_list = []
 		for sent in sentences:
-			vecs = [[encoding_dict[c]/dict_length] for c in sent]
+			vecs = []
+			for c in sent:
+				try:
+					v = encoding_dict[c]
+				except KeyError:
+					v = encoding_dict[Text.UNKNOWN_TOKEN]
+				vecs.append([v/dict_length])
 			pad_length = num_vectors - len(vecs)
 			vecs += pad_length * [[encoding_dict[Text.PAD_TOKEN]]]
 			result_list.append(vecs)

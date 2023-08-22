@@ -1,6 +1,7 @@
 from typing import Any, Mapping, Union
 from .senses import *
 from .configs import *
+from .utils import join_parameters
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -72,30 +73,30 @@ class Kain(nn.Module):
         )
 
         self.opt_ti = optim.Adam(
-            [
+            join_parameters(
                 self.text_encoder, 
                 self.image_encoder, 
                 self.text_decoder, 
                 self.image_decoder
-            ],
+            ),
             lr=General.LEARNING_RATE
         )
         self.opt_iv = optim.Adam(
-            [
+            join_parameters(
                 self.image_encoder, 
                 self.voice_encoder, 
                 self.image_decoder,
-                self.voice_decoder, 
-            ],
+                self.voice_decoder
+            ),
             lr=General.LEARNING_RATE
         )
         self.opt_vt = optim.Adam(
-            [
+            join_parameters(
                 self.voice_encoder, 
                 self.text_encoder, 
-                self.voice_decoder, 
+                self.voice_decoder,
                 self.text_decoder
-            ],
+            ),
             lr=General.LEARNING_RATE
         )
 
