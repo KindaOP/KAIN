@@ -1,6 +1,6 @@
 import torch
-from collections import OrderedDict
-from typing import Sequence, Tuple, Dict
+import numpy as np
+from typing import Tuple, Dict, Sequence
 
 
 class General:
@@ -9,6 +9,7 @@ class General:
 	NUM_HEADS_PER_BLOCK = 2
 	NUM_FEEDFORWARD_DIM = 256
 	ADDNORM_DROPOUT_RATE = 0.1
+	LEARNING_RATE = 1e-4
 	######################################################
 
 	NUM_FEATURES = None
@@ -205,6 +206,39 @@ class Text:
 			decoding_dict[i] = c
 		return encoding_dict, decoding_dict
 
+	@staticmethod
+	def preprocess(
+		sentences:Sequence[str],
+		encoding_dict:Dict[str, int],
+		num_vectors:int
+		) -> torch.Tensor:
+		dict_length = len(encoding_dict)
+		result_list = []
+		for sent in sentences:
+			vecs = [[encoding_dict[c]/dict_length] for c in sent]
+			pad_length = num_vectors - len(vecs)
+			vecs += pad_length * [[encoding_dict[Text.PAD_TOKEN]]]
+			result_list.append(vecs)
+		result = torch.tensor(result_list, dtype=torch.float32)
+		return result
+
+	@staticmethod
+	def postprocess(
+		vectors:torch.Tensor,
+		decoding_dict:Dict[int, str]
+		) -> Sequence[str]:
+		dict_length = len(decoding_dict)
+		result_array = vectors.numpy()
+		result_list = np.clip(
+			np.round(result_array*dict_length), 0, dict_length-1
+		).tolist()
+		result = []
+		for vecs in result_list:
+			vecs = [decoding_dict[i[0]] for i in vecs]
+			sent = ''.join([c for c in vecs if not c==Text.PAD_TOKEN])
+			result.append(sent)
+		return result
+
 
 class Image:
 	#################### CUSTOMISABLE ####################
@@ -219,6 +253,19 @@ class Image:
 		NUM_CHANNELS
 	)
 
+	@staticmethod
+	def preprocess(x:np.ndarray) -> torch.Tensor:
+		x = torch.from_numpy(x)
+		x = x.type(torch.float32)
+		x = x.transpose(-3, -1)
+		return x
+
+	@staticmethod
+	def postprocess(x:torch.Tensor) -> np.ndarray:
+		x = x.transpose(-3, -1).numpy()
+		x = np.clip(x, 0, 1)
+		return x
+
 
 class Voice:
     #################### CUSTOMISABLE ####################
@@ -227,3 +274,16 @@ class Voice:
 	######################################################
 	
 	MAX_SIGNAL_LENGTH = SAMPLING_RATE * MAX_SECONDS
+
+	@staticmethod
+	def preprocess(x:np.ndarray) -> torch.Tensor:
+		x = torch.from_numpy(x)
+		x = x.type(torch.float32)
+		x = x - x.mean(dim=-1, keepdims=True)
+		return x
+
+	@staticmethod
+	def postprocess(x:torch.Tensor) -> np.ndarray:
+		x = x - x.mean(dim=-1, keepdims=True)
+		x = x.numpy()
+		return x
